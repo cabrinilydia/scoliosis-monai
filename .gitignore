@@ -1,12 +1,48 @@
-# Python-generated files
+# ----------------------------
+# Python generated files
+# ----------------------------
 __pycache__/
-*.py[oc]
+*.py[cod]
 build/
 dist/
 wheels/
 *.egg-info
+
+# ----------------------------
+# Virtual environments
+# ----------------------------
+.venv/
+venv/
+env/
+
+# ----------------------------
+# Dataset / Data
+# ----------------------------
 data/
 *.zip
 
-# Virtual environments
-.venv
+# ----------------------------
+# Model weights
+# ----------------------------
+*.pt
+*.pth
+*.ckpt
+
+# ----------------------------
+# Training outputs
+# ----------------------------
+outputs/
+eval_outputs/
+eval_outputs_train/
+runs/
+
+# ----------------------------
+# Specific files
+# ----------------------------
+check.py
+*.png
+# ----------------------------
+# OS files
+# ----------------------------
+.DS_Store
+Thumbs.db
