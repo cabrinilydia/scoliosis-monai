@@ -32,12 +32,12 @@ from sklearn.model_selection import train_test_split
 IMAGE_DIR = "data/images"
 MASK_DIR = "data/masks_id"
 NUM_CLASSES = 20
-CROP_SIZE = 1024
+CROP_SIZE = 1280
 VAL_RATIO = 0.2
 SEED = 42
 SPLIT_BY_IMAGE = False
 MODEL_PATH = "best_metric_model_segmentation2d_dict.pth"
-OUTPUT_DIR = "eval_outputs_train"
+OUTPUT_DIR = "eval_outputs"
 
 
 # ── DICOM loader (same as training) ──────────────────────────────────
@@ -58,7 +58,7 @@ def patient_from_stem(stem: str) -> str:
     return stem.split("_", 1)[0]
 
 
-def make_train_dicts(image_dir, mask_dir, val_ratio=0.2, seed=42, split_by_patient=True):
+def make_val_dicts(image_dir, mask_dir, val_ratio=0.2, seed=42, split_by_patient=True):
     image_map = {p.stem: p for p in Path(image_dir).glob("*.dcm")}
     mask_map = {p.stem: p for p in Path(mask_dir).glob("*.png")}
     paired = sorted(image_map.keys() & mask_map.keys())
@@ -68,15 +68,15 @@ def make_train_dicts(image_dir, mask_dir, val_ratio=0.2, seed=42, split_by_patie
 
     if split_by_patient:
         patient_ids = sorted({s["patient_id"] for s in samples})
-        train_patients, _ = train_test_split(patient_ids, test_size=val_ratio, random_state=seed)
-        train_files = [s for s in samples if s["patient_id"] in set(train_patients)]
+        _, val_patients = train_test_split(patient_ids, test_size=val_ratio, random_state=seed)
+        val_files = [s for s in samples if s["patient_id"] in set(val_patients)]
     else:
-        train_files, _ = train_test_split(samples, test_size=val_ratio, random_state=seed)
+        _, val_files = train_test_split(samples, test_size=val_ratio, random_state=seed)
 
-    return train_files
+    return val_files
 
 
-# ── transforms (same as training val transforms) ──────────────────────
+# ── transforms (same preprocessing as training eval/val) ──────────────
 val_transforms = Compose([
     LoadDicomd(keys=["image"]),
     LoadImaged(keys=["label"]),
@@ -105,11 +105,11 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-    # load val set using same split as training
-    train_files = make_train_dicts(IMAGE_DIR, MASK_DIR, VAL_RATIO, SEED, not SPLIT_BY_IMAGE)
-    print(f"Evaluating on {len(train_files)} training images")
+    # load val set using same split logic as training
+    val_files = make_val_dicts(IMAGE_DIR, MASK_DIR, VAL_RATIO, SEED, not SPLIT_BY_IMAGE)
+    print(f"Evaluating on {len(val_files)} validation images")
 
-    val_ds = Dataset(data=train_files, transform=val_transforms)
+    val_ds = Dataset(data=val_files, transform=val_transforms)
     val_loader = DataLoader(
         val_ds,
         batch_size=1,
@@ -122,7 +122,7 @@ def main():
         spatial_dims=2,
         in_channels=1,
         out_channels=NUM_CLASSES,
-        channels=(16, 32, 64, 128, 256),
+        channels=(32, 64, 128, 256, 512),
         strides=(2, 2, 2, 2),
         num_res_units=2,
         dropout=0.2,
@@ -139,7 +139,7 @@ def main():
         for i, val_data in enumerate(val_loader):
             val_images = val_data["image"].to(device)
             val_labels = val_data["label"].to(device)
-            stem = Path(train_files[i]["image"]).stem
+            stem = Path(val_files[i]["image"]).stem
 
             # sliding window inference
             val_outputs = sliding_window_inference(
@@ -186,7 +186,7 @@ def main():
     # final dice score
     mean_dice = dice_metric.aggregate().item()
     dice_metric.reset()
-    print(f"\nMean Dice across training set: {mean_dice:.4f}")
+    print(f"\nMean Dice across validation set: {mean_dice:.4f}")
 
 
 if __name__ == "__main__":

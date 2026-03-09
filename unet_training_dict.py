@@ -5,7 +5,7 @@ import monai
 import numpy as np
 import pydicom
 import torch
-from monai.data import DataLoader, Dataset, decollate_batch, list_data_collate
+from monai.data import DataLoader, Dataset, decollate_batch, list_data_collate, pad_list_data_collate
 from monai.inferers import sliding_window_inference
 from monai.losses import DiceCELoss
 from monai.metrics import DiceMetric
@@ -21,6 +21,7 @@ from monai.transforms import (
     RandFlipd,
     RandRotate90d,
     ScaleIntensityd,
+    SpatialPadd,
     Transposed,
 )
 from monai.visualize import plot_2d_or_3d_image
@@ -34,20 +35,20 @@ class TrainConfig:
     mask_dir: str = "data/masks_id"
     num_classes: int = 20
     epochs: int = 1000
-    batch_size: int = 2
+    batch_size: int = 1
     num_workers: int = 8
     lr: float = 1e-4
     val_ratio: float = 0.2
     seed: int = 42
     val_interval: int = 2
-    crop_size: int = 1024
-    num_samples_per_image: int = 4
+    crop_size: int = 1280 
+    num_samples_per_image: int = 8
     model_out: str = "best_metric_model_segmentation2d_dict.pth"
     log_dir: str = "runs/unet_training_dict"
     split_by_image: bool = False
-    patience: int = 50          # stop if no improvement for this many val checks
-    resume: bool = True         # resume from checkpoint if it exists
-
+    patience: int = 50
+    resume: bool = True
+    sw_overlap: float = 0.5
 
 
 class LoadDicomd(MapTransform):
@@ -63,7 +64,6 @@ class LoadDicomd(MapTransform):
 
 
 def patient_from_stem(stem: str) -> str:
-    # Stem format is expected like pt14_I2197000.
     return stem.split("_", 1)[0]
 
 
@@ -116,6 +116,7 @@ def get_transforms(crop_size: int, num_samples: int):
             Transposed(keys=["label"], indices=[1, 0]),
             EnsureChannelFirstd(keys=["image", "label"], channel_dim="no_channel"),
             ScaleIntensityd(keys=["image"]),
+            SpatialPadd(keys=["image", "label"], spatial_size=(crop_size, crop_size), mode="constant"),
             CastToTyped(keys=["image"], dtype=np.float32),
             CastToTyped(keys=["label"], dtype=np.int64),
             RandCropByPosNegLabeld(
@@ -139,6 +140,7 @@ def get_transforms(crop_size: int, num_samples: int):
             Transposed(keys=["label"], indices=[1, 0]),
             EnsureChannelFirstd(keys=["image", "label"], channel_dim="no_channel"),
             ScaleIntensityd(keys=["image"]),
+            SpatialPadd(keys=["image", "label"], spatial_size=(crop_size, crop_size), mode="constant"),
             CastToTyped(keys=["image"], dtype=np.float32),
             CastToTyped(keys=["label"], dtype=np.int64),
             EnsureTyped(keys=["image", "label"]),
@@ -159,6 +161,8 @@ def train(cfg: TrainConfig):
         seed=cfg.seed,
         split_by_patient=not cfg.split_by_image,
     )
+    train_files = [{k: v for k, v in s.items() if k != "patient_id"} for s in train_files]
+    val_files = [{k: v for k, v in s.items() if k != "patient_id"} for s in val_files]
     print(f"Train pairs: {len(train_files)} | Val pairs: {len(val_files)}")
     print("Sample training entry:", {k: v for k, v in train_files[0].items() if k != "patient_id"})
 
@@ -175,7 +179,7 @@ def train(cfg: TrainConfig):
         batch_size=cfg.batch_size,
         shuffle=True,
         num_workers=cfg.num_workers,
-        collate_fn=list_data_collate,
+        collate_fn=pad_list_data_collate,
         pin_memory=torch.cuda.is_available(),
     )
     val_loader = DataLoader(
@@ -189,7 +193,7 @@ def train(cfg: TrainConfig):
         spatial_dims=2,
         in_channels=1,
         out_channels=cfg.num_classes,
-        channels=(16, 32, 64, 128, 256),
+        channels=(32, 64, 128, 256, 512),
         strides=(2, 2, 2, 2),
         num_res_units=2,
     ).to(device)
@@ -235,6 +239,7 @@ def train(cfg: TrainConfig):
                     roi_size=(cfg.crop_size, cfg.crop_size),
                     sw_batch_size=1,
                     predictor=model,
+                    overlap=cfg.sw_overlap,
                 )
                 last_val_images = val_images
                 last_val_labels = val_labels
@@ -266,4 +271,3 @@ def train(cfg: TrainConfig):
 if __name__ == "__main__":
     config = TrainConfig()
     train(config)
-    

@@ -1,7 +1,24 @@
-from tensorboard.backend.event_processing.event_accumulator import EventAccumulator
+from tensorboard.backend.event_processing.event_accumulator import (
+    AUDIO,
+    COMPRESSED_HISTOGRAMS,
+    DEFAULT_SIZE_GUIDANCE,
+    HISTOGRAMS,
+    IMAGES,
+    TENSORS,
+    EventAccumulator,
+)
 import matplotlib.pyplot as plt
 
-ea = EventAccumulator("runs/unet_training_dict")
+size_guidance = {
+    TENSORS: 0,
+    IMAGES: 0,
+    AUDIO: 0,
+    HISTOGRAMS: 0,
+    COMPRESSED_HISTOGRAMS: 0,
+    "scalars": 0,
+}
+
+ea = EventAccumulator("runs/unet_training_dict", size_guidance=size_guidance)
 ea.Reload()
 
 train_loss = [(e.step, e.value) for e in ea.Scalars("train_loss")]
